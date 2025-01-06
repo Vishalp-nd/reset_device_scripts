@@ -6,6 +6,7 @@ from datetime import datetime as dt
 import csv
 import json
 import sys
+import requests
 from tkinter import *
 from collections import OrderedDict
 from lib.broadcast_helper import broadcast_main
@@ -65,6 +66,7 @@ class SSHSession:
         # ftp = self.client.open_sftp()
         # ftp.put(local_file_path, remote_file_path)
         command = f"sshpass -p {self.password} scp -o StrictHostKeyChecking=no {local_file_path} {self.username}@{self.host}:{remote_file_path}"
+        #print(command)
         p = subprocess.Popen(command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         stdout, stderr = p.communicate()
         if "Host key verification failed." in stderr.decode():
@@ -80,11 +82,77 @@ class SSHSession:
 
     def __del__(self):
         self.client.close()
+    
+class CloudSession:
+    _instance = None
+
+    def __new__(cls, device_id):
+        if cls._instance is None:
+            cls._instance = super(CloudSession, cls).__new__(cls)
+            cls._instance.device_id = device_id
+            cls._instance.session_key,_, cls._instance.access_token = cls._instance.login_api()
+        return cls._instance
+
+    def __init__(self, device_id):
+        self.device_id = device_id
+
+    @staticmethod
+    def login_api():
+        try:
+            status = False
+            session_key = ''
+            access_token = ''
+            cmd1 = "curl --location --request POST 'https://auth-staging.netradyne.com/authserver/api/v1/oauth/token' --header 'Content-Type:application/x-www-form-urlencoded' --data-urlencode 'client_id=idms' --data-urlencode 'grant_type=password' --data-urlencode 'username=device-test-automation' --data-urlencode 'password=devicetestautomation'"
+            login_response = os.popen(cmd1).read()
+            login_response = json.loads(login_response)
+            print(login_response)
+            access_token = login_response["access_token"]
+            cmd2 = "curl --location --request POST 'https://auth-staging.netradyne.com/authserver/api/v1/session' --header 'Authorization: bearer " + access_token + "'"
+            session_response1 = os.popen(cmd2).read()
+            session_response = json.loads(session_response1)
+            session_key = session_response['session']['session_id']
+            if session_key != ' ':
+                status = True
+        except Exception as e:
+            print(f"Error in login_api: {e}")
+        finally:
+            return session_key, status, access_token
+    
+    def ping_request_sender(self,ping_command):
+        device_id = self.device_id
+        if self.session_key and self.access_token:
+            status = True
+        try: 
+            if status:  
+                url = f"https://idms-staging.netradyne.com/restserver/api/v1/devices/{device_id}/ping"  
+                headers = {  
+                    "session-key": self.session_key,  
+                    "Content-Type": "application/json",  
+                    "Authorization": f"Bearer {self.access_token}"  
+                }  
+                data = {  
+                    "deviceId": self.device_id,  
+                    "userId": "8430",  
+                    "commands": [f"{ping_command}"]  
+                }  
+                response = requests.post(url, headers=headers, data=json.dumps(data))
+                response_content = response.json()
+                if response.status_code == 200 and response_content["data"]["status"] == 0:    
+                    response_status = True  
+                else:  
+                    raise Exception(f"Ping {ping_command} api call response is not received")  
+            else:  
+                raise Exception("session key is not generated")  
+        except Exception as e:  
+            print(f"Error in ops_data_api: {e}")   
+        finally:  
+            return response_status
 
 class Setup:
-    def __init__(self, ssh: SSHSession, config:Config):
+    def __init__(self, ssh: SSHSession, config:Config, cloud: CloudSession):
         self.ssh: SSHSession = ssh
         self.config: Config  = config
+        self.cloud: CloudSession = cloud
 
     def setup_sam_config(self):
         self.ssh.upload_file("configs/sam_config.ini" ,self.config.sam_config)
@@ -161,6 +229,17 @@ class Setup:
         output_in, err = self.ssh.execute_command(nd_in_command)
         print(message_format(self.config.device_id,"ND_output", output_out.strip()))
         print(message_format(self.config.device_id,"ND_input", output_in.strip()))
+    
+    def reset_bgr_pass(self):
+        command = "echo 'ubuntu:EKM2800123Netra' | sudo chpasswd"
+        if self.config.product_line == "KRT":
+            print(message_format(self.config.device_id,"Reset Password", "N/A"))
+        else:
+            output,err = self.ssh.execute_command(command)
+            if err == "":
+                print(message_format(self.config.device_id,"Reset Password", "PASS"))
+            else:
+                print(message_format(self.config.device_id,"Reset Password", "FAIL"))
 
     def setup_certificates(self):
         # overall_status = False
@@ -288,6 +367,11 @@ class Setup:
             output,err = self.ssh.execute_command("echo 'EKM2800123Netra' | sudo lte_gps_test 'ATi' | grep 'Model' | awk -F': ' {'print $2'}")
         print(message_format(self.config.device_id, "Lumia ID", output.strip()))
 
+    def keep_alive_ping(self):
+        status = self.cloud.ping_request_sender("keep-alive")
+        if status:
+            print(message_format(self.config.device_id, "Keep Alive Ping", "PASS"))
+
     def reboot(self):
         try:
             if self.config.product_line == "KRT":
@@ -312,18 +396,21 @@ def reset_main(csv_file):
             if device_id.startswith("66"):
                 product_line = "KRT"
             config = Config(product_line,device_id)
+            cloud = CloudSession(device_id)
             username = config.username
             password = config.password
             print(f"Device ID: {device_id}, IP Address: {ip_address}, Product Line: {product_line}") 
             print("--------------------------------------------------------------------")
             ssh = SSHSession(ip_address, 22, username, password)
-            setup = Setup(ssh, config)
+            setup = Setup(ssh, config, cloud)
 
+            setup.keep_alive_ping()
             setup.get_lumia_id()
             setup.get_device_version()
             setup.device_date_check()
             setup.check_event_logs_vod_obs()
             setup.check_nd_output_nd_input()
+            setup.reset_bgr_pass()
             # setup.setup_sam_config()
             setup.setup_conn_mgr_config()
             setup.setup_bagheera_override()
@@ -471,8 +558,7 @@ if __name__ == "__main__":
         broadcast_main(device_data)
         print("\n\n\n")
         reset_main("Output/device.csv")
-        
-    if args.devices:
+    elif args.devices:
         print("Devices argument provided")
         device_list = args.devices.split(",")
         broadcast_main(device_list)
@@ -482,7 +568,7 @@ if __name__ == "__main__":
         print("CSV argument provided")
         reset_main(args.csv)
     else:
-        print("Please provide the device list with -d or the device csv with -c")
+        print("Please provide proper arguments (read the README.md file)")
 
     if args.save:
         print("Saving to Excel")
