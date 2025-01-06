@@ -14,7 +14,8 @@ from openpyxl import Workbook
 from openpyxl.styles import PatternFill, Font, Alignment
 import argparse
 import os
-
+from time import sleep
+import pandas as pd
 
 device_status = {}
 
@@ -545,6 +546,7 @@ if __name__ == "__main__":
     parser.add_argument("-j", "--json", help="JSON file with device information")
     parser.add_argument("-s", "--save", action="store_true", help="Save output to Excel")
     parser.add_argument("--no-tk", action="store_true", help="Disable Tkinter table display")
+    parser.add_argument("--jenkins", action="store_true", help="Jenkins mode")
 
     args = parser.parse_args()
 
@@ -576,6 +578,26 @@ if __name__ == "__main__":
         if not os.path.exists(output_folder):
             os.makedirs(output_folder)
         save_table_to_excel(device_status, os.path.join(output_folder, "device_status.xlsx"))
+
+    if args.jenkins:
+        print("Jenkins mode")
+        exit = 0
+        sleep_bool = False
+        for device in device_status.keys():
+            if 'FAIL' in list(device_status[device].values()):
+                exit = 1
+            if int(device_status[device]["VOD upload remaining"]) > 10 or int(device_status[device]["Obs upload remaining"]) > 10:
+                sleep_bool = True
+            elif 'FAIL' not in list(device_status[device].values()):
+                df = pd.read_csv("Output/device.csv", index_col=0)
+                df = df.drop(index=int(device), errors='ignore')  # `errors='ignore'` avoids errors if index not found
+                # Save the updated DataFrame back to a CSV file (optional)
+                df.to_csv('Output/device.csv')
+        if sleep_bool:
+            print("Sleeping for 10 minutes for VOD and OBS to upload")
+            time.sleep(10)
+        print(":::::::::::::::::::::DEVICE RESET SCRIPT COMPLETED::::::::::::::::::::::::::::")
+        sys.exit(exit)
 
     if not args.no_tk:
         print("Displaying Tkinter table")

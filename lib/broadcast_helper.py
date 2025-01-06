@@ -3,7 +3,7 @@ import socket
 import json
 import time
 import csv
-import os
+import os,sys
 
 final_output = ""
 device_data = {}
@@ -109,4 +109,9 @@ def broadcast_main(devices):
         print("No device list provided.")
 
 if __name__ == "__main__":
-    broadcast_main()
+    if len(sys.argv) > 1:
+        device_list = sys.argv[1].split(',')
+        print(device_list)
+        broadcast_main(device_list)
+    else:
+        print("No device list provided.")
