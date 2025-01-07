@@ -592,8 +592,8 @@ if __name__ == "__main__":
                 print(f"Device {device} reset successful")
                 with open("./lib/device_rack.json", 'r') as file:
                     data = json.load(file)
-                if int(device) in data[args.json]:
-                    data[args.json].remove(int(device))
+                if device in data[args.json]:
+                    data[args.json].remove(device)
                 with open("./lib/device_rack.json", 'w') as file:
                     json.dump(data, file, indent=4)
                 
