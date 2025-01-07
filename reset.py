@@ -412,7 +412,7 @@ def reset_main(csv_file):
             setup.check_event_logs_vod_obs()
             setup.check_nd_output_nd_input()
             setup.reset_bgr_pass()
-            # setup.setup_sam_config()
+            setup.setup_sam_config()
             setup.setup_conn_mgr_config()
             setup.setup_bagheera_override()
             # setup.setup_certificates()
