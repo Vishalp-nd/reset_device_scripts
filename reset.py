@@ -15,7 +15,7 @@ from openpyxl.styles import PatternFill, Font, Alignment
 import argparse
 import os
 from time import sleep
-import pandas as pd
+import json
 
 device_status = {}
 
@@ -589,13 +589,17 @@ if __name__ == "__main__":
             if int(device_status[device]["VOD upload remaining"]) > 10 or int(device_status[device]["Obs upload remaining"]) > 10:
                 sleep_bool = True
             elif 'FAIL' not in list(device_status[device].values()):
-                df = pd.read_csv("Output/device.csv", index_col=0)
-                df = df.drop(index=int(device), errors='ignore')  # `errors='ignore'` avoids errors if index not found
-                # Save the updated DataFrame back to a CSV file (optional)
-                df.to_csv('Output/device.csv')
+                print(f"Device {device} reset successful")
+                with open("./lib/device_rack.json", 'r') as file:
+                    data = json.load(file)
+                if int(device) in data[args.json]:
+                    data[args.json].remove(int(device))
+                with open("./lib/device_rack.json", 'w') as file:
+                    json.dump(data, file, indent=4)
+                
         if sleep_bool:
             print("Sleeping for 10 minutes for VOD and OBS to upload")
-            time.sleep(10)
+            time.sleep(700)
         print(":::::::::::::::::::::DEVICE RESET SCRIPT COMPLETED::::::::::::::::::::::::::::")
         sys.exit(exit)
 
